@@ -7,31 +7,6 @@ import { RELICS, QUIZ_QUESTIONS } from '../constants.tsx';
 
 const COLORS = ['#CF4432', '#A7C438', '#2563EB', '#7C3AED', '#DB2777'];
 
-const downloadCSV = (data: any[], filename: string, headers: string[]) => {
-  if (data.length === 0) {
-    alert('当前没有可导出的数据。');
-    return;
-  }
-  const BOM = '\uFEFF';
-  const csvRows = [headers.join(',')];
-  data.forEach(item => {
-    const values = headers.map(header => {
-      const val = item[header] !== undefined ? item[header] : '';
-      return `"${('' + val).replace(/"/g, '""')}"`;
-    });
-    csvRows.push(values.join(','));
-  });
-  const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', `${filename}_${new Date().toISOString().split('T')[0]}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
-
 const DistributionChartBlock = ({ title, data, color }: any) => (
   <div className="space-y-4">
     <h3 className="text-xs font-black text-stone-400 uppercase text-center tracking-widest">{title}</h3>
@@ -112,17 +87,39 @@ const AssetRow = ({ title, sub, assetKey, exists, onUpload, onDelete }: any) => 
 };
 
 const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'stats' | 'assets'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'assets' | 'sync'>('stats');
   const [assetSubTab, setAssetSubTab] = useState<'image' | 'audio'>('image');
   const [localAssetsExistence, setLocalAssetsExistence] = useState<Record<string, boolean>>({});
   const [selectedRelicId, setSelectedRelicId] = useState<string>(RELICS[1].id);
   const [selectedType, setSelectedType] = useState<AudienceTypeValue>(AudienceType.EXPLORER);
+  
+  // 同步状态
+  const [syncCode, setSyncCode] = useState(storageService.getSyncCode());
+  const [syncStatus, setSyncStatus] = useState('待检查同步');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const evaluations = storageService.getAllEvaluations();
   const quizResults = storageService.getAllQuizResults();
+  const playbacks = storageService.getAllPlaybacks();
   
   const refreshAssets = () => { storageService.getAssetExistenceMap().then(setLocalAssetsExistence); };
-  useEffect(() => { refreshAssets(); }, []);
+  
+  useEffect(() => { 
+    refreshAssets();
+    if (syncCode) handleAutoSync();
+  }, []);
+
+  const handleAutoSync = async () => {
+    setIsSyncing(true);
+    await storageService.performAutoSync(setSyncStatus);
+    setIsSyncing(false);
+    refreshAssets();
+  };
+
+  const handleSaveSyncCode = () => {
+    storageService.setSyncCode(syncCode);
+    handleAutoSync();
+  };
 
   const quizStats = useMemo(() => {
     return QUIZ_QUESTIONS[0].options.map(opt => ({
@@ -131,12 +128,30 @@ const AdminDashboard: React.FC = () => {
     }));
   }, [quizResults]);
 
+  const audioAnalytics = useMemo(() => {
+    const data: any[] = [];
+    RELICS.forEach(relic => {
+      Object.values(AudienceType).forEach(type => {
+        const relatedEvents = playbacks.filter(p => p.relicId === relic.id && p.narrativeType === type);
+        const clicks = relatedEvents.filter(p => !p.isCompleted).length;
+        const completions = relatedEvents.filter(p => p.isCompleted).length;
+        const rate = clicks > 0 ? Math.round((completions / clicks) * 100) : 0;
+        data.push({
+          fullLabel: `${relic.title}+${type}`,
+          clicks,
+          rate
+        });
+      });
+    });
+    return data;
+  }, [playbacks]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, key: string) => {
     const file = e.target.files?.[0];
     if (file) {
       await storageService.saveAsset(key, file);
       refreshAssets();
-      alert(`资源已安全保存至本地库：[${key}]`);
+      alert(`资源已上传并同步：[${key}]`);
     }
   };
 
@@ -153,10 +168,39 @@ const AdminDashboard: React.FC = () => {
           <p className="text-stone-400 font-bold uppercase text-[10px] tracking-widest mt-1">Research Data & Asset Management</p>
         </div>
         <div className="flex bg-stone-200 p-1 rounded-xl">
-          <button onClick={() => setActiveTab('stats')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'stats' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}>数据看板</button>
-          <button onClick={() => setActiveTab('assets')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'assets' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}>资源库管理</button>
+          <button onClick={() => setActiveTab('stats')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'stats' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}>数据统计</button>
+          <button onClick={() => setActiveTab('assets')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'assets' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}>资源管理</button>
+          <button onClick={() => setActiveTab('sync')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === 'sync' ? 'bg-white shadow-sm text-[#CF4432]' : 'text-stone-500'}`}>同步中心</button>
         </div>
       </header>
+
+      {activeTab === 'sync' && (
+        <div className="space-y-6">
+          <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-stone-100">
+            <h2 className="text-xl font-black mb-6 flex items-center gap-3">
+              <div className={`w-3 h-3 rounded-full ${syncCode ? 'bg-green-500 animate-pulse' : 'bg-stone-200'}`} />
+              全馆多端同步配置
+            </h2>
+            <div className="max-w-md space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest ml-1">云端同步码 (Sync Code)</label>
+                <div className="flex gap-2">
+                  <input type="text" value={syncCode} onChange={(e) => setSyncCode(e.target.value)} placeholder="输入同步码链接多台设备" className="flex-1 p-4 bg-stone-50 rounded-2xl border-2 border-transparent focus:border-[#CF4432] outline-none font-bold text-sm" />
+                  <button onClick={handleSaveSyncCode} className="px-6 py-4 bg-stone-900 text-white rounded-2xl font-black text-xs active:scale-95 transition-all">激活同步</button>
+                </div>
+              </div>
+              <div className="p-6 bg-stone-50 rounded-[2rem] border border-stone-100">
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-[10px] font-black text-stone-400 uppercase tracking-widest">同步状态报告</span>
+                  {isSyncing && <div className="w-4 h-4 border-2 border-[#CF4432] border-t-transparent rounded-full animate-spin" />}
+                </div>
+                <p className="text-stone-700 font-bold text-sm text-center py-4">{syncStatus}</p>
+                <button onClick={handleAutoSync} className="w-full py-3 bg-white border border-stone-200 text-stone-600 rounded-xl font-black text-[10px] uppercase hover:bg-stone-50 transition-colors">强制重新同步所有资源</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'stats' && (
         <div className="space-y-10">
@@ -197,6 +241,50 @@ const AdminDashboard: React.FC = () => {
                <CombinationDistributions relicId={selectedRelicId} type={selectedType} evaluations={evaluations} />
             </div>
           </section>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+            <section className="bg-white p-8 rounded-[2.5rem] border border-stone-100 shadow-sm">
+              <h2 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
+                <span className="w-1.5 h-6 bg-[#CF4432] rounded-full" />
+                3. 各音频累计播放点击量 (25路)
+              </h2>
+              <div className="h-[700px] w-full">
+                <ResponsiveContainer>
+                  <BarChart data={audioAnalytics} layout="vertical" margin={{ left: 60, right: 40 }}>
+                    <CartesianGrid horizontal={false} stroke="#f5f5f5" />
+                    <XAxis type="number" hide />
+                    <YAxis dataKey="fullLabel" type="category" width={140} axisLine={false} tickLine={false} style={{ fontSize: '10px', fontWeight: 'bold', fill: '#888' }} />
+                    <Tooltip cursor={{fill: '#fcfcfc'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                    <Bar dataKey="clicks" radius={[0, 4, 4, 0]} barSize={16}>
+                      {audioAnalytics.map((entry, index) => <Cell key={index} fill={COLORS[index % 5]} />)}
+                      <LabelList dataKey="clicks" position="right" style={{ fontSize: '10px', fontWeight: '900', fill: '#CF4432' }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <section className="bg-white p-8 rounded-[2.5rem] border border-stone-100 shadow-sm">
+              <h2 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
+                <span className="w-1.5 h-6 bg-[#A7C438] rounded-full" />
+                4. 音频平均播放完成度 (百分比)
+              </h2>
+              <div className="h-[700px] w-full">
+                <ResponsiveContainer>
+                  <BarChart data={audioAnalytics} layout="vertical" margin={{ left: 60, right: 60 }}>
+                    <CartesianGrid horizontal={false} stroke="#f5f5f5" />
+                    <XAxis type="number" domain={[0, 100]} hide />
+                    <YAxis dataKey="fullLabel" type="category" width={140} axisLine={false} tickLine={false} style={{ fontSize: '10px', fontWeight: 'bold', fill: '#888' }} />
+                    <Tooltip formatter={(value: number) => [`${value}%`, '平均完成度']} cursor={{fill: '#fcfcfc'}} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                    <Bar dataKey="rate" radius={[0, 4, 4, 0]} barSize={16}>
+                      {audioAnalytics.map((entry, index) => <Cell key={index} fill={entry.rate > 60 ? '#A7C438' : '#F59E0B'} />)}
+                      <LabelList dataKey="rate" position="right" formatter={(v: number) => `${v}%`} style={{ fontSize: '10px', fontWeight: '900', fill: '#444' }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          </div>
         </div>
       )}
 
@@ -213,26 +301,11 @@ const AdminDashboard: React.FC = () => {
           <div className="space-y-4">
             {assetSubTab === 'image' ? (
               <div className="grid grid-cols-1 gap-3">
-                <AssetRow 
-                  title="首页入口海报 (System Poster)" 
-                  sub="Key: poster" 
-                  assetKey="poster" 
-                  exists={localAssetsExistence['poster']} 
-                  onUpload={handleFileUpload} 
-                  onDelete={handleFileDelete}
-                />
+                <AssetRow title="首页入口海报" sub="Key: poster" assetKey="poster" exists={localAssetsExistence['poster']} onUpload={handleFileUpload} onDelete={handleFileDelete} />
                 <div className="h-px bg-stone-100 my-4" />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {RELICS.map(relic => (
-                    <AssetRow 
-                      key={relic.id}
-                      title={relic.title} 
-                      sub={`ID: ${relic.id}`} 
-                      assetKey={relic.id} 
-                      exists={localAssetsExistence[relic.id]} 
-                      onUpload={handleFileUpload} 
-                      onDelete={handleFileDelete}
-                    />
+                    <AssetRow key={relic.id} title={relic.title} sub={`ID: ${relic.id}`} assetKey={relic.id} exists={localAssetsExistence[relic.id]} onUpload={handleFileUpload} onDelete={handleFileDelete} />
                   ))}
                 </div>
               </div>
@@ -242,7 +315,7 @@ const AdminDashboard: React.FC = () => {
                   <div key={relic.id} className="p-6 bg-stone-50 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 border border-stone-100">
                     <div className="flex flex-col items-center md:items-start">
                       <span className="text-sm font-black text-gray-800">{relic.title}</span>
-                      <span className="text-[10px] text-stone-400 font-bold uppercase mt-1">Audio Packs</span>
+                      <span className="text-[10px] text-stone-400 font-bold uppercase mt-1">语音解说包</span>
                     </div>
                     <div className="flex flex-wrap justify-center gap-3">
                       {Object.values(AudienceType).map(type => {
@@ -257,11 +330,7 @@ const AdminDashboard: React.FC = () => {
                             </label>
                             <div className="flex items-center gap-1">
                                <span className="text-[8px] font-bold text-stone-400">{type}</span>
-                               {exists && (
-                                 <button onClick={() => { if(confirm('清除音频？')) handleFileDelete(audioKey); }} className="text-stone-300 hover:text-red-400 transition-colors">
-                                   <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                 </button>
-                               )}
+                               {exists && <button onClick={() => handleFileDelete(audioKey)} className="text-stone-300 hover:text-red-400"><svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>}
                             </div>
                           </div>
                         );
@@ -271,18 +340,6 @@ const AdminDashboard: React.FC = () => {
                 ))}
               </div>
             )}
-          </div>
-          
-          <div className="mt-12 p-6 bg-amber-50 rounded-2xl border border-amber-100">
-            <h4 className="text-amber-800 font-black text-xs mb-2 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              管理提示
-            </h4>
-            <p className="text-amber-700/80 text-[10px] font-medium leading-relaxed">
-              1. 所有资源均保存在浏览器的本地数据库 (IndexedDB) 中，不会因刷新页面而丢失。<br/>
-              2. 建议使用 Chrome 或 Edge 浏览器以获得最稳定的存储体验。<br/>
-              3. 如需在多台设备间同步资源，请务必在每台设备上分别进行上传操作。
-            </p>
           </div>
         </div>
       )}

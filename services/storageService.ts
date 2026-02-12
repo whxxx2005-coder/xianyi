@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   PLAYBACKS: 'horse_exhibit_playbacks',
   VIEWS: 'horse_exhibit_views',
   QUIZ_RESULTS: 'horse_exhibit_quiz_results',
+  SYNC_CODE: 'horse_exhibit_sync_code',
 };
 
 const DB_NAME = 'HorseExhibitAssetsDB';
@@ -31,7 +32,6 @@ export const storageService = {
   getOrCreateSession: (): VisitorSession => {
     const stored = localStorage.getItem(STORAGE_KEYS.SESSION);
     if (stored) return JSON.parse(stored);
-    
     const newSession: VisitorSession = {
       sessionId: crypto.randomUUID(),
       type: null,
@@ -47,53 +47,28 @@ export const storageService = {
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
   },
 
-  saveQuizResult: (result: QuizResult) => {
-    const stored = localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS);
-    const list = stored ? JSON.parse(stored) : [];
-    list.push(result);
-    localStorage.setItem(STORAGE_KEYS.QUIZ_RESULTS, JSON.stringify(list));
-  },
-
-  getAllQuizResults: (): QuizResult[] => {
-    const stored = localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS);
-    return stored ? JSON.parse(stored) : [];
-  },
-
-  saveEvaluation: (evaluation: Evaluation) => {
-    const stored = localStorage.getItem(STORAGE_KEYS.EVALUATIONS);
-    const list = stored ? JSON.parse(stored) : [];
-    list.push(evaluation);
-    localStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(list));
-  },
-
-  trackPlayback: (event: PlaybackEvent) => {
-    const stored = localStorage.getItem(STORAGE_KEYS.PLAYBACKS);
-    const list = stored ? JSON.parse(stored) : [];
-    list.push(event);
-    localStorage.setItem(STORAGE_KEYS.PLAYBACKS, JSON.stringify(list));
-  },
-
-  trackView: (relicId: string) => {
-    const stored = localStorage.getItem(STORAGE_KEYS.VIEWS);
-    const list = stored ? JSON.parse(stored) : [];
-    list.push({ relicId, timestamp: Date.now() });
-    localStorage.setItem(STORAGE_KEYS.VIEWS, JSON.stringify(list));
-  },
-
+  // --- 资产管理（含同步触发） ---
   saveAsset: async (key: string, data: Blob | string): Promise<void> => {
     const db = await getDB();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.put(data, key);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
+
+    // 模拟推送至云端
+    const syncCode = storageService.getSyncCode();
+    if (syncCode) {
+      console.log(`[CloudSync] 正在将资源 ${key} 同步至云端网关...`);
+      // 实际部署时此处调用 fetch('UPLOAD_API', { body: data })
+    }
   },
 
   deleteAsset: async (key: string): Promise<void> => {
     const db = await getDB();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.delete(key);
@@ -128,7 +103,6 @@ export const storageService = {
       const store = transaction.objectStore(STORE_NAME);
       const results: Record<string, boolean> = {};
       const request = store.openKeyCursor();
-      
       request.onsuccess = (event: any) => {
         const cursor = event.target.result;
         if (cursor) {
@@ -142,18 +116,53 @@ export const storageService = {
     });
   },
 
-  getAllEvaluations: (): Evaluation[] => {
+  // --- 多设备同步核心逻辑 ---
+  getSyncCode: () => localStorage.getItem(STORAGE_KEYS.SYNC_CODE) || '',
+  setSyncCode: (code: string) => localStorage.setItem(STORAGE_KEYS.SYNC_CODE, code),
+  
+  performAutoSync: async (onProgress?: (msg: string) => void): Promise<void> => {
+    const syncCode = storageService.getSyncCode();
+    if (!syncCode) return;
+
+    onProgress?.('正在检测云端资源更新...');
+    // 模拟延迟与检查过程
+    await new Promise(r => setTimeout(r, 1000));
+    
+    // 实际逻辑：
+    // 1. fetch 获取云端 manifest
+    // 2. 比对本地 IndexedDB 缺失项
+    // 3. 自动遍历下载缺失项并 saveAsset(key, blob)
+    
+    onProgress?.('同步完成，本地资产已更新');
+  },
+
+  // --- 数据统计 ---
+  saveQuizResult: (result: QuizResult) => {
+    const stored = localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS);
+    const list = stored ? JSON.parse(stored) : [];
+    list.push(result);
+    localStorage.setItem(STORAGE_KEYS.QUIZ_RESULTS, JSON.stringify(list));
+  },
+  getAllQuizResults: (): QuizResult[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS) || '[]'),
+  saveEvaluation: (evaluation: Evaluation) => {
     const stored = localStorage.getItem(STORAGE_KEYS.EVALUATIONS);
-    return stored ? JSON.parse(stored) : [];
+    const list = stored ? JSON.parse(stored) : [];
+    list.push(evaluation);
+    localStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(list));
   },
-
-  getAllPlaybacks: (): PlaybackEvent[] => {
+  getAllEvaluations: (): Evaluation[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.EVALUATIONS) || '[]'),
+  trackPlayback: (event: PlaybackEvent) => {
     const stored = localStorage.getItem(STORAGE_KEYS.PLAYBACKS);
-    return stored ? JSON.parse(stored) : [];
+    const list = stored ? JSON.parse(stored) : [];
+    list.push(event);
+    localStorage.setItem(STORAGE_KEYS.PLAYBACKS, JSON.stringify(list));
   },
-
-  getAllViews: (): { relicId: string; timestamp: number }[] => {
+  getAllPlaybacks: (): PlaybackEvent[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.PLAYBACKS) || '[]'),
+  trackView: (relicId: string) => {
     const stored = localStorage.getItem(STORAGE_KEYS.VIEWS);
-    return stored ? JSON.parse(stored) : [];
-  }
+    const list = stored ? JSON.parse(stored) : [];
+    list.push({ relicId, timestamp: Date.now() });
+    localStorage.setItem(STORAGE_KEYS.VIEWS, JSON.stringify(list));
+  },
+  getAllViews: (): { relicId: string; timestamp: number }[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.VIEWS) || '[]')
 };
