@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
-import { AudienceType, Relic, NarrativeVersion, VisitorSession, Evaluation, QuizResult, AudienceTypeValue } from './types';
-import { QUIZ_QUESTIONS, RELICS, MBTI_PROFILES, RELIC_NARRATIVES } from './constants';
-import { storageService } from './services/storageService';
-import NarrativePlayer from './components/NarrativePlayer';
-import AdminDashboard from './components/AdminDashboard';
+import { AudienceType, Relic, NarrativeVersion, VisitorSession, Evaluation, QuizResult, AudienceTypeValue } from './types.ts';
+import { QUIZ_QUESTIONS, RELICS, MBTI_PROFILES, RELIC_NARRATIVES } from './constants.tsx';
+import { storageService } from './services/storageService.ts';
+import NarrativePlayer from './components/NarrativePlayer.tsx';
+import AdminDashboard from './components/AdminDashboard.tsx';
 
 enum Page {
   POSTER,
@@ -80,10 +80,7 @@ const App: React.FC = () => {
   const [selectedRelic, setSelectedRelic] = useState<Relic | null>(null);
   const [surveyStep, setSurveyStep] = useState(0);
   const [evaluation, setEvaluation] = useState<Partial<Evaluation>>({ feedback: '' });
-  
-  // 新增：追踪当前文物下观众听过的音频类型
   const [playedTypes, setPlayedTypes] = useState<AudienceTypeValue[]>([]);
-
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
 
@@ -111,7 +108,6 @@ const App: React.FC = () => {
   const submitSurvey = (finalRecommendation?: number) => {
     if (!selectedRelic || !session.type) return;
 
-    // 确定评价归属类型
     const uniquePlayed = Array.from(new Set(playedTypes));
     let targetType: AudienceTypeValue = session.type;
     
@@ -150,7 +146,7 @@ const App: React.FC = () => {
 
   const handleOpenRelic = (relic: Relic) => {
     setSelectedRelic(relic);
-    setPlayedTypes([]); // 切换文物时重置听过的类型
+    setPlayedTypes([]);
     setCurrentPage(Page.DETAIL);
     storageService.trackView(relic.id);
   };
@@ -305,7 +301,7 @@ const App: React.FC = () => {
              
              <div className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-stone-100 min-h-[400px] flex flex-col">
                {surveyStep === 0 && (
-                <div className="flex-1 flex flex-col justify-center animate-in fade-in slide-in-from-bottom-4">
+                <div className="flex-1 flex flex-col justify-center">
                   <h3 className="font-black text-xl text-stone-800 mb-8 text-center">1. 您对该解说词的满意程度？</h3>
                   <div className="grid grid-cols-5 gap-2">
                     {[1,2,3,4,5].map(v => (
@@ -319,7 +315,7 @@ const App: React.FC = () => {
               )}
 
               {surveyStep === 1 && (
-                <div className="flex-1 flex flex-col justify-center animate-in fade-in slide-in-from-bottom-4">
+                <div className="flex-1 flex flex-col justify-center">
                   <h3 className="font-black text-xl text-stone-800 mb-8 text-center">2. 该段解说词符合您的观众类型吗？</h3>
                   <div className="space-y-2">
                     {[
@@ -338,7 +334,7 @@ const App: React.FC = () => {
               )}
 
               {surveyStep === 2 && (
-                <div className="flex-1 flex flex-col justify-center animate-in fade-in slide-in-from-bottom-4">
+                <div className="flex-1 flex flex-col justify-center">
                   <h3 className="font-black text-xl text-stone-800 mb-10 text-center">3. 您愿意向朋友推荐该版本吗？</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <button onClick={() => submitSurvey(1)} className="py-8 rounded-3xl border-2 border-stone-50 bg-stone-50 flex flex-col items-center justify-center hover:border-[#A7C438] hover:text-[#A7C438] transition-all group">
@@ -359,7 +355,7 @@ const App: React.FC = () => {
         {currentPage === Page.ADMIN && (
           <div className="px-4 py-8 bg-stone-50 min-h-screen">
             {!isAdminAuthenticated ? (
-              <div className="max-w-md mx-auto mt-20 p-10 bg-white rounded-[2.5rem] shadow-2xl border border-stone-100 text-center animate-in fade-in zoom-in-95 duration-500">
+              <div className="max-w-md mx-auto mt-20 p-10 bg-white rounded-[2.5rem] shadow-2xl border border-stone-100 text-center">
                 <div className="w-16 h-16 bg-[#CF4432]/10 rounded-2xl flex items-center justify-center text-[#CF4432] mx-auto mb-6">
                   <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                 </div>
@@ -370,7 +366,7 @@ const App: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="animate-in fade-in duration-700">
+              <div>
                 <button onClick={() => { setCurrentPage(Page.GALLERY); setIsAdminAuthenticated(false); }} className="mb-8 flex items-center gap-2 text-stone-400 font-black text-[10px] uppercase tracking-widest bg-white px-4 py-2 rounded-full shadow-sm hover:text-[#CF4432] transition-colors"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>退出管理模式</button>
                 <AdminDashboard />
               </div>

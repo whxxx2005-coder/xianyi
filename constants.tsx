@@ -1,5 +1,5 @@
 
-import { AudienceType, QuizQuestion, Relic } from './types';
+import { AudienceType, QuizQuestion, Relic } from './types.ts';
 
 export const QUIZ_QUESTIONS: QuizQuestion[] = [
   {

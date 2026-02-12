@@ -1,5 +1,5 @@
 
-import { Evaluation, PlaybackEvent, VisitorSession, AudienceType, AudienceTypeValue, QuizResult } from '../types';
+import { Evaluation, PlaybackEvent, VisitorSession, AudienceType, AudienceTypeValue, QuizResult } from '../types.ts';
 
 const STORAGE_KEYS = {
   SESSION: 'horse_exhibit_session',
@@ -101,7 +101,6 @@ export const storageService = {
         const result = request.result;
         if (!result) return resolve(null);
         if (result instanceof Blob) {
-          // 返回 URL，由调用方负责 revoke
           resolve(URL.createObjectURL(result));
         } else {
           resolve(result);
@@ -111,7 +110,6 @@ export const storageService = {
     });
   },
 
-  // 关键：修改为仅检查资源是否存在，而不生成 URL
   getAssetExistenceMap: async (): Promise<Record<string, boolean>> => {
     const db = await getDB();
     return new Promise((resolve, reject) => {
