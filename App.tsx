@@ -27,11 +27,11 @@ const ImageWithFallback = ({ assetKey, cloudUrl, alt, className, title }: { asse
 
     storageService.getAsset(assetKey).then(data => {
       if (isMounted) {
-        currentBlobUrl = data;
-        setLocalData(data);
+        if (data) {
+          currentBlobUrl = data;
+          setLocalData(data);
+        }
         setIsLoadingLocal(false);
-      } else if (data && data.startsWith('blob:')) {
-        URL.revokeObjectURL(data);
       }
     }).catch(() => {
       if (isMounted) setIsLoadingLocal(false);
@@ -49,27 +49,20 @@ const ImageWithFallback = ({ assetKey, cloudUrl, alt, className, title }: { asse
     return <div className={`${className} bg-stone-100 animate-pulse`} />;
   }
 
-  if (localData) {
-    return <img src={localData} alt={alt} className={className} />;
-  }
-
-  if (error) {
-    return (
-      <div className={`${className} bg-stone-100 flex flex-col items-center justify-center p-4 text-center border-2 border-stone-200`}>
-        <div className="text-3xl mb-2">🐎</div>
-        <div className="text-[#CF4432] font-serif font-black text-xs uppercase tracking-tighter leading-none">{title || alt}</div>
-      </div>
-    );
-  }
-  
-  const finalSrc = cloudUrl || `./${assetKey === 'poster' ? 'poster.png' : assetKey + '.png'}`;
+  // 加载优先级：1. 同步数据库缓存 2. 项目本地 assets 文件夹 3. 传入的 cloudUrl 
+  const localFilePath = `./assets/images/${assetKey === 'poster' ? 'poster.png' : assetKey + '.png'}`;
+  const finalSrc = localData || (error ? cloudUrl : localFilePath);
 
   return (
     <img 
       src={finalSrc} 
       alt={alt} 
       className={className} 
-      onError={() => setError(true)} 
+      onError={() => {
+        if (!error && cloudUrl) {
+          setError(true);
+        }
+      }} 
     />
   );
 };
@@ -84,70 +77,37 @@ const App: React.FC = () => {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   
-  // 首页同步码状态
   const [tempSyncCode, setTempSyncCode] = useState('');
   const [isSyncingFromHome, setIsSyncingFromHome] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState('');
 
-  // 增加全局同步监听
   useEffect(() => {
     const syncCode = storageService.getSyncCode();
     if (syncCode) {
-      storageService.performAutoSync().then(() => {
-        console.log('启动自动同步已完成');
-      });
+      storageService.performAutoSync();
     }
   }, []);
 
-  // 移除首页自动跳转逻辑
-  useEffect(() => {
-    // 逻辑已移除，不再自动跳转
-  }, [currentPage]);
-
-  const handleAnswer = (opt: { label: string, type: any }) => {
-    storageService.updateSessionType(opt.type);
-    const quizResult: QuizResult = {
-      id: crypto.randomUUID(),
-      sessionId: session.sessionId,
-      selectedType: opt.type,
-      optionLabel: opt.label,
-      timestamp: Date.now()
-    };
-    storageService.saveQuizResult(quizResult);
-    setSession({ ...session, type: opt.type });
-    setCurrentPage(Page.RESULT);
-  };
-
-  const handleSyncFromHome = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSyncFromHome = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (tempSyncCode === '123456') {
       setIsSyncingFromHome(true);
       storageService.setSyncCode(tempSyncCode);
-      await storageService.performAutoSync();
+      await storageService.performAutoSync(setSyncStatusMsg);
       setIsSyncingFromHome(false);
-      // 正确后跳转
       setCurrentPage(Page.QUIZ);
     } else {
-      alert('同步码错误，请输入正确的代码123456以进入系统。');
+      alert('同步码错误。请输入 123456。');
     }
   };
 
   const submitSurvey = (finalRecommendation?: number) => {
     if (!selectedRelic || !session.type) return;
-
-    const uniquePlayed = Array.from(new Set(playedTypes));
-    let targetType: AudienceTypeValue = session.type;
-    
-    if (uniquePlayed.length === 1) {
-      targetType = uniquePlayed[0];
-    } else {
-      targetType = session.type;
-    }
-
     const fullEval: Evaluation = {
       id: crypto.randomUUID(),
       sessionId: session.sessionId,
       relicId: selectedRelic.id,
-      audienceType: targetType,
+      audienceType: session.type,
       matchingScore: evaluation.matchingScore || 0,
       satisfactionScore: evaluation.satisfactionScore || 0,
       recommendationScore: finalRecommendation !== undefined ? finalRecommendation : (evaluation.recommendationScore ?? 0),
@@ -158,16 +118,7 @@ const App: React.FC = () => {
     setSurveyStep(0);
     setEvaluation({ feedback: '' });
     setCurrentPage(Page.GALLERY);
-    alert('感谢参与研究！数据已提交。');
-  };
-
-  const getNarrativeVersions = (relic: Relic): NarrativeVersion[] => {
-    const narratives = RELIC_NARRATIVES[relic.id] || {};
-    return Object.values(AudienceType).map(type => ({
-      type,
-      audioUrl: '',
-      content: narratives[type] || `这里是《${relic.title}》。${relic.description}`
-    }));
+    alert('感谢参与！数据已保存。');
   };
 
   const handleOpenRelic = (relic: Relic) => {
@@ -177,16 +128,12 @@ const App: React.FC = () => {
     storageService.trackView(relic.id);
   };
 
-  const handleExitDetail = () => {
-    setCurrentPage(Page.SURVEY);
-  };
-
   const checkAdminPassword = () => {
     if (adminPassword === '0526') {
       setIsAdminAuthenticated(true);
       setAdminPassword('');
     } else {
-      alert('密码错误。');
+      alert('密码错误');
     }
   };
 
@@ -194,7 +141,7 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-white text-gray-900 font-sans selection:bg-amber-100 overflow-x-hidden">
       {currentPage !== Page.POSTER && (
         <nav className="fixed top-0 left-0 w-full h-14 bg-white/95 backdrop-blur-lg z-40 border-b border-stone-100 flex items-center px-4 justify-between">
-          <div className="font-serif font-black text-[#CF4432] tracking-tighter text-lg">鲜衣怒马少年时</div>
+          <div className="font-serif font-black text-[#D32F2F] tracking-tighter text-lg">鲜衣怒马少年时</div>
           <div className="flex gap-2 items-center">
             {session.type && (
               <div className="flex items-center gap-1.5 bg-[#A7C438]/10 px-2 py-0.5 rounded-full border border-[#A7C438]/20">
@@ -202,8 +149,8 @@ const App: React.FC = () => {
                 <span className="text-[10px] text-[#A7C438] font-black uppercase">{session.type}</span>
               </div>
             )}
-            <button onClick={() => setCurrentPage(Page.ADMIN)} className="p-1.5 text-stone-200 hover:text-[#CF4432] transition-colors">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            <button onClick={() => setCurrentPage(Page.ADMIN)} className="p-1.5 text-stone-200 hover:text-[#D32F2F] transition-colors">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
           </div>
         </nav>
@@ -211,37 +158,67 @@ const App: React.FC = () => {
 
       <main className={currentPage === Page.POSTER ? "" : "pt-14"}>
         {currentPage === Page.POSTER && (
-          <div className="fixed inset-0 bg-stone-950 flex flex-col items-center justify-center text-white z-50 overflow-hidden">
-            <ImageWithFallback assetKey="poster" cloudUrl="https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?auto=format&fit=crop&q=80&w=1200" alt="鲜衣怒马少年时" className="absolute inset-0 w-full h-full object-cover opacity-60 scale-105" />
-            <div className="relative z-10 text-center px-10">
-               <h1 className="text-4xl font-serif font-black tracking-widest mb-4">鲜衣怒马少年时</h1>
-               <div className="w-10 h-0.5 bg-[#CF4432] mx-auto mb-6" />
-               <p className="text-[10px] font-bold tracking-[0.4em] opacity-80 uppercase leading-relaxed mb-12">美术馆个性化叙事导览系统<br/>Personalized Narrative AI Guide</p>
-               
-               {/* 访客同步码窗口 */}
-               <div className="max-w-xs mx-auto bg-white/10 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/20 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-                 <div className="text-[10px] font-black text-white/60 tracking-widest uppercase">资源同步获取</div>
-                 <div className="flex gap-2">
+          <div className="fixed inset-0 bg-white z-50 flex flex-col overflow-y-auto">
+            {/* 上部：海报红色区域 */}
+            <div className="relative flex-none bg-[#D32F2F] h-[50%] w-full flex flex-col px-8 pt-12 pb-6 text-white overflow-hidden">
+               <div className="text-[10px] font-bold leading-tight opacity-90 z-10">廣州藝術博物院<br/>Guangzhou Museum of Art</div>
+               <div className="absolute top-12 right-6 w-24 h-24 rounded-full border border-white/40 flex flex-col items-center justify-center text-white/80 scale-90 z-10">
+                  <div className="text-[14px] font-black border-b border-white/30 mb-0.5 leading-none">2026</div>
+                  <div className="text-[10px] font-black uppercase tracking-tight mt-1 text-center leading-none">Youth In<br/>Splendor</div>
+               </div>
+               <div className="flex-1 flex flex-col items-center justify-center text-center z-10">
+                  <h1 className="text-7xl md:text-8xl font-serif font-black tracking-widest leading-none">鲜衣怒<span className="text-[#A7C438]">马</span></h1>
+                  <h1 className="text-7xl md:text-8xl font-serif font-black tracking-widest leading-none mt-4">少年时</h1>
+                  <p className="text-[9px] font-black tracking-[0.2em] uppercase opacity-70 mt-8 max-w-xs mx-auto">Steed-themed Special Exhibition</p>
+                  <h2 className="text-xl md:text-2xl font-serif font-black mt-4 tracking-[0.4em]">骏马题材作品贺岁特展</h2>
+               </div>
+            </div>
+
+            {/* 中部：装饰区域（替换为真实海报素材） */}
+            <div className="relative flex-none h-[27%] w-full bg-[#F5F2EA] overflow-hidden border-y-2 border-white">
+              <ImageWithFallback 
+                assetKey="horses_deco" 
+                cloudUrl="https://test.fukit.cn/autoupload/fr/Z0kP2aHjOyh4mYQwuvMqmUkZ6Uj704Ca6zDbmEjt8qyyl5f0KlZfm6UsKj-HyTuv/20260212/3zmC/2269X4026/9ba825bd7f08c479caf3fb1b19c52a4c.jpeg" 
+                alt="鲜衣怒马少年时海报" 
+                className="w-full h-full object-cover object-top opacity-90" 
+              />
+              <div className="absolute inset-0 bg-gradient-to-b from-[#D32F2F]/10 via-transparent to-white/10" />
+            </div>
+
+            {/* 底部：交互与资讯 */}
+            <div className="flex-1 bg-white p-8 flex flex-col justify-between">
+              <div className="flex items-start justify-between">
+                <div className="flex gap-4">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <div className="w-12 h-12 bg-[#D32F2F] shadow-sm rounded-sm" />
+                    <span className="text-[9px] font-black text-stone-500">牡丹红</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <div className="w-12 h-12 bg-[#A7C438] shadow-sm rounded-sm" />
+                    <span className="text-[9px] font-black text-stone-500">鹦哥绿</span>
+                  </div>
+                </div>
+                <div className="text-[8px] text-stone-400 font-bold uppercase tracking-wider text-right space-y-1">
+                  <p>GUANGZHOU MUSEUM OF ART RESEARCH PROJECT</p>
+                  <p>2026.01.22 - 2026.03.22</p>
+                </div>
+              </div>
+
+              <div className="mt-8 flex flex-col items-center gap-4">
+                <form onSubmit={handleSyncFromHome} className="w-full max-w-sm flex gap-2">
                    <input 
-                     type="text" 
-                     value={tempSyncCode}
-                     onChange={(e) => setTempSyncCode(e.target.value)}
-                     placeholder="请输入123456以获取资源文件"
-                     className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-[#CF4432] transition-all"
-                   />
-                   <button 
-                     onClick={handleSyncFromHome}
-                     className="bg-[#CF4432] text-white px-5 py-3 rounded-2xl text-[11px] font-black uppercase hover:bg-[#b23a2b] active:scale-95 transition-all shadow-lg"
-                   >
-                     {isSyncingFromHome ? '...' : '确认'}
-                   </button>
-                 </div>
-                 <p className="text-[9px] text-white/40 font-bold">标注：请输入123456以获取资源文件</p>
-               </div>
-               
-               <div className="mt-8 opacity-40">
-                 <p className="text-[10px] font-black tracking-widest text-white/50">请输入同步码进入探索</p>
-               </div>
+                    type="text" 
+                    value={tempSyncCode}
+                    onChange={(e) => setTempSyncCode(e.target.value)}
+                    placeholder="输入同步码 123456"
+                    className="flex-1 bg-stone-100 border-2 border-transparent focus:border-[#D32F2F] rounded-2xl px-5 py-4 text-sm font-black outline-none transition-all placeholder:text-stone-300"
+                  />
+                  <button type="submit" className="bg-[#D32F2F] text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase shadow-xl active:scale-95">激活</button>
+                </form>
+                <div className="flex items-center gap-4 opacity-40">
+                  <p className="text-[9px] font-black tracking-[0.3em] text-stone-400 uppercase">LOCAL ASSETS READY / DISCOVER MORE</p>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -249,12 +226,16 @@ const App: React.FC = () => {
         {currentPage === Page.QUIZ && (
           <div className="px-6 py-12 max-w-lg mx-auto">
             <div className="mb-14 text-center">
-              <span className="text-[#CF4432] font-black text-[10px] uppercase tracking-[0.4em] block mb-3">观众人格探索</span>
+              <span className="text-[#D32F2F] font-black text-[10px] uppercase tracking-[0.4em] block mb-3">观众人格探索</span>
               <h2 className="text-3xl font-serif font-black text-gray-900">{QUIZ_QUESTIONS[0].question}</h2>
             </div>
             <div className="space-y-3">
               {QUIZ_QUESTIONS[0].options.map((opt, i) => (
-                <button key={i} onClick={() => handleAnswer(opt)} className="w-full text-center px-6 py-5 rounded-2xl border border-stone-100 bg-stone-50/50 hover:bg-[#A7C438] hover:text-white transition-all shadow-sm group">
+                <button key={i} onClick={() => {
+                  storageService.updateSessionType(opt.type);
+                  setSession({ ...session, type: opt.type });
+                  setCurrentPage(Page.RESULT);
+                }} className="w-full text-center px-6 py-5 rounded-2xl border border-stone-100 bg-stone-50/50 hover:bg-[#A7C438] hover:text-white transition-all shadow-sm">
                   <span className="text-base font-black inline-block">{opt.label}</span>
                 </button>
               ))}
@@ -266,23 +247,23 @@ const App: React.FC = () => {
           <div className="px-6 py-10 max-w-lg mx-auto text-center flex flex-col justify-center min-h-[85vh]">
             <div className="mb-10">
               <div className="text-8xl mb-6">{(MBTI_PROFILES as any)[session.type].icon}</div>
-              <h3 className="text-[10px] font-black text-[#CF4432] tracking-[0.4em] mb-3 uppercase">您的导览人格是</h3>
+              <h3 className="text-[10px] font-black text-[#D32F2F] tracking-[0.4em] mb-3 uppercase">您的导览人格是</h3>
               <h2 className="text-4xl font-serif font-black mb-1">{session.type}</h2>
             </div>
             <div className="bg-stone-50 p-8 rounded-[2.5rem] mb-12 text-left">
               <h4 className="text-lg font-bold mb-3 text-[#A7C438]">{(MBTI_PROFILES as any)[session.type].title}</h4>
               <p className="text-stone-600 leading-relaxed text-sm font-medium">{(MBTI_PROFILES as any)[session.type].desc}</p>
             </div>
-            <button onClick={() => setCurrentPage(Page.GALLERY)} className="w-full py-5 bg-[#CF4432] text-white rounded-2xl font-black shadow-xl active:scale-95 transition-all text-lg tracking-widest">进入虚拟展厅</button>
+            <button onClick={() => setCurrentPage(Page.GALLERY)} className="w-full py-5 bg-[#D32F2F] text-white rounded-2xl font-black shadow-xl active:scale-95 transition-all text-lg tracking-widest">进入虚拟展厅</button>
           </div>
         )}
 
         {currentPage === Page.GALLERY && (
           <div className="px-4 py-8 max-w-7xl mx-auto space-y-10">
             <header className="flex flex-col items-center text-center px-6">
-              <div className="w-8 h-8 bg-[#CF4432] rounded-lg flex items-center justify-center text-white text-lg mb-4">🐎</div>
+              <div className="w-8 h-8 bg-[#D32F2F] rounded-lg flex items-center justify-center text-white text-lg mb-4">🐎</div>
               <h2 className="text-2xl font-serif font-black tracking-tight mb-2">展厅：鲜衣怒马少年时</h2>
-              <p className="text-[9px] text-stone-400 font-bold uppercase tracking-[0.3em] leading-tight max-w-[200px]">GUANGZHOU MUSEUM OF ART SPECIAL RESEARCH</p>
+              <p className="text-[9px] text-stone-400 font-bold uppercase tracking-[0.3em] font-bold leading-tight max-w-[200px]">GUANGZHOU MUSEUM OF ART SPECIAL RESEARCH</p>
             </header>
             <div className="grid grid-cols-2 gap-3">
               {RELICS.map(relic => (
@@ -304,36 +285,22 @@ const App: React.FC = () => {
           <div className="pb-10">
             <div className="w-full aspect-[4/5] relative">
               <ImageWithFallback assetKey={selectedRelic.id} cloudUrl={selectedRelic.imageUrl} alt={selectedRelic.title} className="w-full h-full object-cover" title={selectedRelic.title} />
-              <button onClick={handleExitDetail} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-lg">
+              <button onClick={() => setCurrentPage(Page.SURVEY)} className="absolute top-4 left-4 w-10 h-10 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white active:scale-90 shadow-lg">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15 19l-7-7 7-7" /></svg>
               </button>
             </div>
             <div className="px-5 -mt-8 relative z-10 space-y-6">
-              <div className="bg-white p-7 rounded-[2.5rem] shadow-2xl border border-stone-50 space-y-5">
-                <div>
-                  <div className="text-[10px] text-[#A7C438] font-black tracking-widest uppercase mb-1">{selectedRelic.dynasty} {selectedRelic.author}</div>
-                  <h1 className="text-3xl font-serif font-black tracking-tight text-gray-900">{selectedRelic.title}</h1>
-                </div>
-                <p className="text-stone-500 leading-relaxed text-sm font-medium">{selectedRelic.description}</p>
+              <div className="bg-white p-7 rounded-[2.5rem] shadow-2xl border border-stone-50">
+                <div className="text-[10px] text-[#A7C438] font-black tracking-widest uppercase mb-1">{selectedRelic.dynasty} {selectedRelic.author}</div>
+                <h1 className="text-3xl font-serif font-black text-gray-900">{selectedRelic.title}</h1>
+                <p className="text-stone-500 mt-4 leading-relaxed text-sm font-medium">{selectedRelic.description}</p>
               </div>
               <NarrativePlayer 
                 relicId={selectedRelic.id}
-                versions={getNarrativeVersions(selectedRelic)}
+                versions={Object.values(AudienceType).map(t => ({ type: t, audioUrl: '', content: RELIC_NARRATIVES[selectedRelic.id]?.[t] || '' }))}
                 selectedType={session.type}
-                onComplete={() => {
-                  storageService.trackPlayback({
-                    id: crypto.randomUUID(), sessionId: session.sessionId, relicId: selectedRelic.id,
-                    narrativeType: session.type as any, isCompleted: true, timestamp: Date.now()
-                  });
-                  setCurrentPage(Page.SURVEY);
-                }}
-                onPlay={(type) => {
-                  setPlayedTypes(prev => [...prev, type]);
-                  storageService.trackPlayback({
-                    id: crypto.randomUUID(), sessionId: session.sessionId, relicId: selectedRelic.id,
-                    narrativeType: type as any, isCompleted: false, timestamp: Date.now()
-                  });
-                }}
+                onComplete={() => setCurrentPage(Page.SURVEY)}
+                onPlay={(type) => {}}
               />
             </div>
           </div>
@@ -342,23 +309,22 @@ const App: React.FC = () => {
         {currentPage === Page.SURVEY && (
           <div className="px-6 py-12 max-w-lg mx-auto flex flex-col justify-center min-h-[85vh]">
              <div className="text-center mb-8">
-               <h2 className="text-2xl font-serif font-black text-gray-900 tracking-tight">听后感调研</h2>
+               <h2 className="text-2xl font-serif font-black text-gray-900">听后感调研</h2>
                <div className="flex justify-center gap-1 mt-4">
                  {[0, 1, 2].map(step => (
-                   <div key={step} className={`h-1 rounded-full transition-all ${surveyStep === step ? 'w-8 bg-[#CF4432]' : 'w-4 bg-stone-200'}`} />
+                   <div key={step} className={`h-1 rounded-full transition-all ${surveyStep === step ? 'w-8 bg-[#D32F2F]' : 'w-4 bg-stone-200'}`} />
                  ))}
                </div>
              </div>
              
-             <div className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-stone-100 min-h-[400px] flex flex-col">
+             <div className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-stone-100 flex flex-col min-h-[400px]">
                {surveyStep === 0 && (
                 <div className="flex-1 flex flex-col justify-center">
                   <h3 className="font-black text-xl text-stone-800 mb-8 text-center">1. 您对该解说词的满意程度？</h3>
                   <div className="grid grid-cols-5 gap-2">
                     {[1,2,3,4,5].map(v => (
-                      <button key={v} onClick={() => { setEvaluation({...evaluation, satisfactionScore: v}); setSurveyStep(1); }} className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center transition-all ${evaluation.satisfactionScore === v ? 'border-[#CF4432] bg-[#CF4432] text-white' : 'border-stone-50 bg-stone-50 text-stone-400'}`}>
+                      <button key={v} onClick={() => { setEvaluation({...evaluation, satisfactionScore: v}); setSurveyStep(1); }} className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center transition-all ${evaluation.satisfactionScore === v ? 'border-[#D32F2F] bg-[#D32F2F] text-white' : 'border-stone-50 bg-stone-50 text-stone-400'}`}>
                         <span className="text-lg font-black">{v}</span>
-                        <span className="text-[8px] font-bold">分</span>
                       </button>
                     ))}
                   </div>
@@ -369,15 +335,9 @@ const App: React.FC = () => {
                 <div className="flex-1 flex flex-col justify-center">
                   <h3 className="font-black text-xl text-stone-800 mb-8 text-center">2. 该段解说词符合您的观众类型吗？</h3>
                   <div className="space-y-2">
-                    {[
-                      { label: '完全符合', val: 5 },
-                      { label: '比较符合', val: 4 },
-                      { label: '一般符合', val: 3 },
-                      { label: '比较不符合', val: 2 },
-                      { label: '完全不符合', val: 1 }
-                    ].map(opt => (
-                      <button key={opt.val} onClick={() => { setEvaluation({...evaluation, matchingScore: opt.val}); setSurveyStep(2); }} className="w-full py-4 px-6 rounded-2xl border-2 border-stone-50 bg-stone-50 text-stone-600 font-black text-sm hover:border-[#A7C438] active:scale-98 transition-all">
-                        {opt.label}
+                    {['完全符合', '比较符合', '一般符合', '比较不符合', '完全不符合'].map((label, idx) => (
+                      <button key={idx} onClick={() => { setEvaluation({...evaluation, matchingScore: 5-idx}); setSurveyStep(2); }} className="w-full py-4 px-6 rounded-2xl border-2 border-stone-50 bg-stone-50 text-stone-600 font-black text-sm">
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -388,12 +348,12 @@ const App: React.FC = () => {
                 <div className="flex-1 flex flex-col justify-center">
                   <h3 className="font-black text-xl text-stone-800 mb-10 text-center">3. 您愿意向朋友推荐该版本吗？</h3>
                   <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => submitSurvey(1)} className="py-8 rounded-3xl border-2 border-stone-50 bg-stone-50 flex flex-col items-center justify-center hover:border-[#A7C438] hover:text-[#A7C438] transition-all group">
-                      <span className="text-4xl mb-2 group-hover:scale-110 transition-transform">👍</span>
+                    <button onClick={() => submitSurvey(1)} className="py-8 rounded-3xl border-2 border-stone-50 bg-stone-50 flex flex-col items-center justify-center hover:border-[#A7C438] transition-all">
+                      <span className="text-4xl mb-2">👍</span>
                       <span className="text-lg font-black">是</span>
                     </button>
-                    <button onClick={() => submitSurvey(0)} className="py-8 rounded-3xl border-2 border-stone-50 bg-stone-50 flex flex-col items-center justify-center hover:border-stone-300 transition-all group">
-                      <span className="text-4xl mb-2 group-hover:scale-110 transition-transform">👎</span>
+                    <button onClick={() => submitSurvey(0)} className="py-8 rounded-3xl border-2 border-stone-50 bg-stone-50 flex flex-col items-center justify-center hover:border-stone-300 transition-all">
+                      <span className="text-4xl mb-2">👎</span>
                       <span className="text-lg font-black">否</span>
                     </button>
                   </div>
@@ -406,19 +366,14 @@ const App: React.FC = () => {
         {currentPage === Page.ADMIN && (
           <div className="px-4 py-8 bg-stone-50 min-h-screen">
             {!isAdminAuthenticated ? (
-              <div className="max-w-md mx-auto mt-20 p-10 bg-white rounded-[2.5rem] shadow-2xl border border-stone-100 text-center">
-                <div className="w-16 h-16 bg-[#CF4432]/10 rounded-2xl flex items-center justify-center text-[#CF4432] mx-auto mb-6">
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                </div>
-                <h2 className="text-xl font-black text-gray-900 mb-2">管理人员身份验证</h2>
-                <div className="space-y-4">
-                  <input type="password" placeholder="请输入管理密码" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && checkAdminPassword()} className="w-full p-5 bg-stone-50 rounded-2xl text-center font-black tracking-[0.5em] text-lg outline-none ring-2 ring-stone-50 focus:ring-[#CF4432] transition-all" />
-                  <button onClick={checkAdminPassword} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-black shadow-lg hover:bg-black active:scale-95 transition-all text-sm tracking-widest">确认进入</button>
-                </div>
+              <div className="max-w-md mx-auto mt-20 p-10 bg-white rounded-[2.5rem] shadow-2xl text-center">
+                <h2 className="text-xl font-black text-gray-900 mb-6">管理人员身份验证</h2>
+                <input type="password" placeholder="请输入密码" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} className="w-full p-5 bg-stone-50 rounded-2xl text-center font-black outline-none mb-4" />
+                <button onClick={checkAdminPassword} className="w-full py-4 bg-stone-900 text-white rounded-2xl font-black">确认进入</button>
               </div>
             ) : (
               <div>
-                <button onClick={() => { setCurrentPage(Page.GALLERY); setIsAdminAuthenticated(false); }} className="mb-8 flex items-center gap-2 text-stone-400 font-black text-[10px] uppercase tracking-widest bg-white px-4 py-2 rounded-full shadow-sm hover:text-[#CF4432] transition-colors"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>退出管理模式</button>
+                <button onClick={() => setIsAdminAuthenticated(false)} className="mb-4 text-xs font-bold text-stone-400">退出管理</button>
                 <AdminDashboard />
               </div>
             )}
