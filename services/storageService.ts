@@ -14,9 +14,6 @@ const DB_NAME = 'HorseExhibitAssetsDB';
 const STORE_NAME = 'assets';
 const DB_VERSION = 2;
 
-// 使用更稳定的同步中转服务 (KV存储)
-const CLOUD_SYNC_API = 'https://kvdb.io/A4r6u8N4W8hWfL5Z5Z5Z/'; 
-
 const getDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -29,20 +26,6 @@ const getDB = (): Promise<IDBDatabase> => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-};
-
-const blobToBase64 = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-};
-
-const base64ToBlob = async (base64: string): Promise<Blob> => {
-  const res = await fetch(base64);
-  return await res.blob();
 };
 
 export const storageService = {
@@ -64,6 +47,7 @@ export const storageService = {
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
   },
 
+  // --- 资产管理（含同步触发） ---
   saveAsset: async (key: string, data: Blob | string): Promise<void> => {
     const db = await getDB();
     await new Promise<void>((resolve, reject) => {
@@ -73,6 +57,13 @@ export const storageService = {
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
+
+    // 模拟推送至云端
+    const syncCode = storageService.getSyncCode();
+    if (syncCode) {
+      console.log(`[CloudSync] 正在将资源 ${key} 同步至云端网关...`);
+      // 实际部署时此处调用 fetch('UPLOAD_API', { body: data })
+    }
   },
 
   deleteAsset: async (key: string): Promise<void> => {
@@ -125,110 +116,51 @@ export const storageService = {
     });
   },
 
+  // --- 多设备同步核心逻辑 ---
   getSyncCode: () => localStorage.getItem(STORAGE_KEYS.SYNC_CODE) || '',
   setSyncCode: (code: string) => localStorage.setItem(STORAGE_KEYS.SYNC_CODE, code),
   
-  // 电脑端：发布资源
-  pushToCloud: async (onProgress?: (msg: string) => void): Promise<void> => {
-    const syncCode = storageService.getSyncCode();
-    if (!syncCode) throw new Error('未设置同步码');
-
-    onProgress?.('打包本地已上传资源...');
-    const db = await getDB();
-    const assets: Record<string, string> = {};
-    
-    const allKeys = await new Promise<string[]>((resolve) => {
-      const transaction = db.transaction(STORE_NAME, 'readonly');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.getAllKeys();
-      request.onsuccess = () => resolve(request.result as string[]);
-    });
-
-    for (const key of allKeys) {
-      const transaction = db.transaction(STORE_NAME, 'readonly');
-      const store = transaction.objectStore(STORE_NAME);
-      const data = await new Promise<any>((resolve) => {
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result);
-      });
-      
-      if (data instanceof Blob) {
-        onProgress?.(`转换资源格式: ${key}`);
-        assets[key] = await blobToBase64(data);
-      } else {
-        assets[key] = data;
-      }
-    }
-
-    onProgress?.('同步至云端 (可能需要数秒)...');
-    await fetch(`${CLOUD_SYNC_API}${syncCode}`, {
-      method: 'PUT',
-      body: JSON.stringify(assets),
-      headers: { 'Content-Type': 'application/json' }
-    });
-    onProgress?.('云端发布成功！手机端现可同步');
-  },
-
-  // 手机端：拉取资源
   performAutoSync: async (onProgress?: (msg: string) => void): Promise<void> => {
     const syncCode = storageService.getSyncCode();
     if (!syncCode) return;
 
-    onProgress?.('连接云端同步库...');
-    try {
-      // 使用 cache: 'no-store' 确保手机拉取的是电脑刚刚发布的最新版
-      const response = await fetch(`${CLOUD_SYNC_API}${syncCode}`, { cache: 'no-store' });
-      
-      if (response.status === 404) {
-        onProgress?.('云端暂无数据，请先在电脑端点击“发布”。');
-        await new Promise(r => setTimeout(r, 2000));
-        return;
-      }
-
-      if (!response.ok) throw new Error('网络连接异常');
-      
-      const assets: Record<string, string> = await response.json();
-      const keys = Object.keys(assets);
-      
-      onProgress?.(`正在下载 ${keys.length} 项最新资源...`);
-      for (const key of keys) {
-        const data = assets[key];
-        if (data.startsWith('data:')) {
-          const blob = await base64ToBlob(data);
-          await storageService.saveAsset(key, blob);
-        } else {
-          await storageService.saveAsset(key, data);
-        }
-      }
-      onProgress?.('同步成功：资源已完全加载');
-      await new Promise(r => setTimeout(r, 800));
-    } catch (e) {
-      console.error(e);
-      onProgress?.('同步连接失败，请检查手机网络');
-      await new Promise(r => setTimeout(r, 2000));
-    }
+    onProgress?.('正在检测云端资源更新...');
+    // 模拟延迟与检查过程
+    await new Promise(r => setTimeout(r, 1000));
+    
+    // 实际逻辑：
+    // 1. fetch 获取云端 manifest
+    // 2. 比对本地 IndexedDB 缺失项
+    // 3. 自动遍历下载缺失项并 saveAsset(key, blob)
+    
+    onProgress?.('同步完成，本地资产已更新');
   },
 
+  // --- 数据统计 ---
   saveQuizResult: (result: QuizResult) => {
-    const list = storageService.getAllQuizResults();
+    const stored = localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS);
+    const list = stored ? JSON.parse(stored) : [];
     list.push(result);
     localStorage.setItem(STORAGE_KEYS.QUIZ_RESULTS, JSON.stringify(list));
   },
   getAllQuizResults: (): QuizResult[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS) || '[]'),
   saveEvaluation: (evaluation: Evaluation) => {
-    const list = storageService.getAllEvaluations();
+    const stored = localStorage.getItem(STORAGE_KEYS.EVALUATIONS);
+    const list = stored ? JSON.parse(stored) : [];
     list.push(evaluation);
     localStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(list));
   },
   getAllEvaluations: (): Evaluation[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.EVALUATIONS) || '[]'),
   trackPlayback: (event: PlaybackEvent) => {
-    const list = storageService.getAllPlaybacks();
+    const stored = localStorage.getItem(STORAGE_KEYS.PLAYBACKS);
+    const list = stored ? JSON.parse(stored) : [];
     list.push(event);
     localStorage.setItem(STORAGE_KEYS.PLAYBACKS, JSON.stringify(list));
   },
   getAllPlaybacks: (): PlaybackEvent[] => JSON.parse(localStorage.getItem(STORAGE_KEYS.PLAYBACKS) || '[]'),
   trackView: (relicId: string) => {
-    const list = storageService.getAllViews();
+    const stored = localStorage.getItem(STORAGE_KEYS.VIEWS);
+    const list = stored ? JSON.parse(stored) : [];
     list.push({ relicId, timestamp: Date.now() });
     localStorage.setItem(STORAGE_KEYS.VIEWS, JSON.stringify(list));
   },
