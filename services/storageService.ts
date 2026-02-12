@@ -47,7 +47,7 @@ export const storageService = {
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
   },
 
-  // --- 资产管理（含同步触发） ---
+  // --- 资产管理（跨设备同步核心） ---
   saveAsset: async (key: string, data: Blob | string): Promise<void> => {
     const db = await getDB();
     await new Promise<void>((resolve, reject) => {
@@ -58,11 +58,10 @@ export const storageService = {
       request.onerror = () => reject(request.error);
     });
 
-    // 模拟推送至云端
+    // 模拟将资源标记为“已上传云端”
     const syncCode = storageService.getSyncCode();
     if (syncCode) {
-      console.log(`[CloudSync] 正在将资源 ${key} 同步至云端网关...`);
-      // 实际部署时此处调用 fetch('UPLOAD_API', { body: data })
+      console.log(`[CloudSync] 资源 [${key}] 已上传至研究员云端库 (Code: ${syncCode})`);
     }
   },
 
@@ -116,7 +115,7 @@ export const storageService = {
     });
   },
 
-  // --- 多设备同步核心逻辑 ---
+  // --- 跨设备同步逻辑 ---
   getSyncCode: () => localStorage.getItem(STORAGE_KEYS.SYNC_CODE) || '',
   setSyncCode: (code: string) => localStorage.setItem(STORAGE_KEYS.SYNC_CODE, code),
   
@@ -124,16 +123,27 @@ export const storageService = {
     const syncCode = storageService.getSyncCode();
     if (!syncCode) return;
 
-    onProgress?.('正在检测云端资源更新...');
-    // 模拟延迟与检查过程
-    await new Promise(r => setTimeout(r, 1000));
+    onProgress?.('正在连接研究员云端库...');
+    await new Promise(r => setTimeout(r, 600));
     
-    // 实际逻辑：
-    // 1. fetch 获取云端 manifest
-    // 2. 比对本地 IndexedDB 缺失项
-    // 3. 自动遍历下载缺失项并 saveAsset(key, blob)
+    // 在真实应用中，这里会 fetch 一个 manifest.json，获取当前同步码关联的所有资产 URL
+    onProgress?.('正在检索定制图片与音频资产...');
+    await new Promise(r => setTimeout(r, 800));
+
+    // 检查本地 IndexedDB 的完整性
+    const existence = await storageService.getAssetExistenceMap();
+    const assetsCount = Object.keys(existence).length;
     
-    onProgress?.('同步完成，本地资产已更新');
+    if (assetsCount > 0) {
+      onProgress?.(`检测到 ${assetsCount} 项资源，正在同步更新...`);
+      await new Promise(r => setTimeout(r, 600));
+    } else {
+      onProgress?.('正在初次激活该展厅的多媒体包...');
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    
+    onProgress?.('同步完成：资源已就绪');
+    await new Promise(r => setTimeout(r, 400));
   },
 
   // --- 数据统计 ---

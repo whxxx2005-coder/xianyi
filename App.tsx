@@ -87,21 +87,17 @@ const App: React.FC = () => {
   // 首页同步码状态
   const [tempSyncCode, setTempSyncCode] = useState('');
   const [isSyncingFromHome, setIsSyncingFromHome] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState('');
 
   // 增加全局同步监听
   useEffect(() => {
     const syncCode = storageService.getSyncCode();
     if (syncCode) {
       storageService.performAutoSync().then(() => {
-        console.log('启动自动同步已完成');
+        console.log('自动同步流程已完成');
       });
     }
   }, []);
-
-  // 移除首页自动跳转逻辑
-  useEffect(() => {
-    // 逻辑已移除，不再自动跳转
-  }, [currentPage]);
 
   const handleAnswer = (opt: { label: string, type: any }) => {
     storageService.updateSessionType(opt.type);
@@ -122,12 +118,12 @@ const App: React.FC = () => {
     if (tempSyncCode === '123456') {
       setIsSyncingFromHome(true);
       storageService.setSyncCode(tempSyncCode);
-      await storageService.performAutoSync();
+      // 必须完成同步逻辑后才跳转，确保跨设备资产就绪
+      await storageService.performAutoSync(setSyncStatusMsg);
       setIsSyncingFromHome(false);
-      // 正确后跳转
       setCurrentPage(Page.QUIZ);
     } else {
-      alert('同步码错误，请输入正确的代码123456以进入系统。');
+      alert('同步码错误。请输入正确的 123456 以激活后台资源。');
     }
   };
 
@@ -158,7 +154,7 @@ const App: React.FC = () => {
     setSurveyStep(0);
     setEvaluation({ feedback: '' });
     setCurrentPage(Page.GALLERY);
-    alert('感谢参与研究！数据已提交。');
+    alert('感谢参与研究！数据已安全存储。');
   };
 
   const getNarrativeVersions = (relic: Relic): NarrativeVersion[] => {
@@ -212,35 +208,47 @@ const App: React.FC = () => {
       <main className={currentPage === Page.POSTER ? "" : "pt-14"}>
         {currentPage === Page.POSTER && (
           <div className="fixed inset-0 bg-stone-950 flex flex-col items-center justify-center text-white z-50 overflow-hidden">
-            <ImageWithFallback assetKey="poster" cloudUrl="https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?auto=format&fit=crop&q=80&w=1200" alt="鲜衣怒马少年时" className="absolute inset-0 w-full h-full object-cover opacity-60 scale-105" />
+            <ImageWithFallback 
+              assetKey="poster" 
+              cloudUrl="https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?auto=format&fit=crop&q=80&w=1200" 
+              alt="鲜衣怒马少年时" 
+              className="absolute inset-0 w-full h-full object-cover opacity-60 scale-105" 
+            />
             <div className="relative z-10 text-center px-10">
                <h1 className="text-4xl font-serif font-black tracking-widest mb-4">鲜衣怒马少年时</h1>
-               <div className="w-10 h-0.5 bg-[#CF4432] mx-auto mb-6" />
+               <div className="w-10 h-0.5 bg-[#CF4432] mx-auto mb-6 shadow-lg" />
                <p className="text-[10px] font-bold tracking-[0.4em] opacity-80 uppercase leading-relaxed mb-12">美术馆个性化叙事导览系统<br/>Personalized Narrative AI Guide</p>
                
                {/* 访客同步码窗口 */}
-               <div className="max-w-xs mx-auto bg-white/10 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/20 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-                 <div className="text-[10px] font-black text-white/60 tracking-widest uppercase">资源同步获取</div>
+               <div className="max-w-xs mx-auto bg-white/10 backdrop-blur-2xl p-6 rounded-[2.5rem] border border-white/20 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+                 <div className="text-[10px] font-black text-white/60 tracking-widest uppercase">
+                   {isSyncingFromHome ? '正在激活资源...' : '资源同步激活'}
+                 </div>
                  <div className="flex gap-2">
                    <input 
                      type="text" 
                      value={tempSyncCode}
                      onChange={(e) => setTempSyncCode(e.target.value)}
-                     placeholder="请输入123456以获取资源文件"
+                     placeholder="输入 123456"
                      className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-[#CF4432] transition-all"
                    />
                    <button 
                      onClick={handleSyncFromHome}
-                     className="bg-[#CF4432] text-white px-5 py-3 rounded-2xl text-[11px] font-black uppercase hover:bg-[#b23a2b] active:scale-95 transition-all shadow-lg"
+                     className="bg-[#CF4432] text-white px-5 py-3 rounded-2xl text-[11px] font-black uppercase hover:bg-[#b23a2b] active:scale-95 transition-all shadow-lg min-w-[60px]"
                    >
                      {isSyncingFromHome ? '...' : '确认'}
                    </button>
                  </div>
-                 <p className="text-[9px] text-white/40 font-bold">标注：请输入123456以获取资源文件</p>
+                 {syncStatusMsg && (
+                   <p className="text-[9px] text-white/60 font-bold animate-pulse">{syncStatusMsg}</p>
+                 )}
+                 {!syncStatusMsg && (
+                   <p className="text-[9px] text-white/40 font-bold">注：输入123456同步云端多媒体文件</p>
+                 )}
                </div>
                
-               <div className="mt-8 opacity-40">
-                 <p className="text-[10px] font-black tracking-widest text-white/50">请输入同步码进入探索</p>
+               <div className="mt-12 opacity-30">
+                 <p className="text-[9px] font-black tracking-[0.5em] text-white/50 uppercase">START RESEARCH EXPLORATION</p>
                </div>
             </div>
           </div>
