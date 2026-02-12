@@ -91,6 +91,17 @@ export const storageService = {
     });
   },
 
+  deleteAsset: async (key: string): Promise<void> => {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.delete(key);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  },
+
   getAsset: async (key: string): Promise<string | null> => {
     const db = await getDB();
     return new Promise((resolve, reject) => {

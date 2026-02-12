@@ -66,9 +66,53 @@ const CombinationDistributions = ({ relicId, type, evaluations }: { relicId: str
   );
 };
 
+const AssetRow = ({ title, sub, assetKey, exists, onUpload, onDelete }: any) => {
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (exists && (assetKey === 'poster' || RELICS.some(r => r.id === assetKey))) {
+      storageService.getAsset(assetKey).then(setPreview);
+    } else {
+      setPreview(null);
+    }
+  }, [exists, assetKey]);
+
+  return (
+    <div className={`flex items-center justify-between p-4 rounded-2xl border transition-all ${exists ? 'bg-white border-[#A7C438]/30 shadow-sm' : 'bg-stone-50 border-stone-100'}`}>
+      <div className="flex items-center gap-4">
+        {preview ? (
+          <div className="w-12 h-12 rounded-lg overflow-hidden border border-stone-100 shadow-sm flex-shrink-0">
+            <img src={preview} alt="preview" className="w-full h-full object-cover" />
+          </div>
+        ) : (
+          <div className="w-12 h-12 rounded-lg bg-stone-100 flex items-center justify-center text-stone-300 flex-shrink-0">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          </div>
+        )}
+        <div className="flex flex-col">
+          <span className="text-xs font-black text-gray-800">{title}</span>
+          <span className="text-[9px] font-bold text-stone-400 uppercase tracking-tight">{sub}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        {exists && (
+          <button onClick={() => { if(confirm('确定要永久删除此资源吗？')) onDelete(assetKey); }} className="p-2 text-stone-300 hover:text-red-500 transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </button>
+        )}
+        <div className="relative group">
+          <input type="file" accept="image/*" onChange={(e) => onUpload(e, assetKey)} className="absolute inset-0 opacity-0 cursor-pointer" />
+          <div className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${exists ? 'bg-[#A7C438]/10 text-[#A7C438] border border-[#A7C438]/20' : 'bg-stone-900 text-white shadow-sm'}`}>
+            {exists ? '替换图片' : '上传图片'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AdminDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'stats' | 'assets'>('stats');
-  const [statsMode, setStatsMode] = useState<'dashboard' | 'report'>('dashboard');
   const [assetSubTab, setAssetSubTab] = useState<'image' | 'audio'>('image');
   const [localAssetsExistence, setLocalAssetsExistence] = useState<Record<string, boolean>>({});
   const [selectedRelicId, setSelectedRelicId] = useState<string>(RELICS[1].id);
@@ -92,8 +136,13 @@ const AdminDashboard: React.FC = () => {
     if (file) {
       await storageService.saveAsset(key, file);
       refreshAssets();
-      alert(`资源 [${key}] 已更新`);
+      alert(`资源已安全保存至本地库：[${key}]`);
     }
+  };
+
+  const handleFileDelete = async (key: string) => {
+    await storageService.deleteAsset(key);
+    refreshAssets();
   };
 
   return (
@@ -156,60 +205,84 @@ const AdminDashboard: React.FC = () => {
           <div className="flex justify-between items-center mb-12 border-b border-stone-50 pb-8">
             <h2 className="text-2xl font-black">资源库管理</h2>
             <div className="flex bg-stone-100 p-1 rounded-2xl">
-              <button onClick={() => setAssetSubTab('image')} className={`px-8 py-2.5 rounded-xl text-xs font-black transition-all ${assetSubTab === 'image' ? 'bg-white shadow-sm text-[#CF4432]' : 'text-stone-400'}`}>图片</button>
-              <button onClick={() => setAssetSubTab('audio')} className={`px-8 py-2.5 rounded-xl text-xs font-black transition-all ${assetSubTab === 'audio' ? 'bg-white shadow-sm text-[#CF4432]' : 'text-stone-400'}`}>音频</button>
+              <button onClick={() => setAssetSubTab('image')} className={`px-8 py-2.5 rounded-xl text-xs font-black transition-all ${assetSubTab === 'image' ? 'bg-white shadow-sm text-[#CF4432]' : 'text-stone-400'}`}>图片资源</button>
+              <button onClick={() => setAssetSubTab('audio')} className={`px-8 py-2.5 rounded-xl text-xs font-black transition-all ${assetSubTab === 'audio' ? 'bg-white shadow-sm text-[#CF4432]' : 'text-stone-400'}`}>讲解音频</button>
             </div>
           </div>
-          <div className="space-y-6">
+          
+          <div className="space-y-4">
             {assetSubTab === 'image' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* 系统海报项 */}
-                <div className="flex items-center justify-between p-5 bg-stone-100/50 rounded-2xl border-2 border-dashed border-stone-200">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-black text-stone-800">首页入口海报 (System)</span>
-                    <span className="text-[10px] font-bold text-[#CF4432] uppercase mt-1">Key: poster</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {localAssetsExistence['poster'] && <span className="text-[9px] bg-[#A7C438] text-white px-1.5 py-0.5 rounded font-black">已就绪</span>}
-                    <input type="file" accept="image/*" onChange={(e) => handleFileUpload(e, 'poster')} className="text-[10px] w-48" />
-                  </div>
+              <div className="grid grid-cols-1 gap-3">
+                <AssetRow 
+                  title="首页入口海报 (System Poster)" 
+                  sub="Key: poster" 
+                  assetKey="poster" 
+                  exists={localAssetsExistence['poster']} 
+                  onUpload={handleFileUpload} 
+                  onDelete={handleFileDelete}
+                />
+                <div className="h-px bg-stone-100 my-4" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {RELICS.map(relic => (
+                    <AssetRow 
+                      key={relic.id}
+                      title={relic.title} 
+                      sub={`ID: ${relic.id}`} 
+                      assetKey={relic.id} 
+                      exists={localAssetsExistence[relic.id]} 
+                      onUpload={handleFileUpload} 
+                      onDelete={handleFileDelete}
+                    />
+                  ))}
                 </div>
-                {/* 文物列表项 */}
-                {RELICS.map(relic => (
-                  <div key={relic.id} className="flex items-center justify-between p-5 bg-stone-50 rounded-2xl border border-stone-100">
-                    <div className="flex flex-col">
-                      <span className="text-xs font-black">{relic.title}</span>
-                      <span className="text-[10px] font-medium text-stone-400 uppercase mt-1">ID: {relic.id}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {localAssetsExistence[relic.id] && <span className="text-[9px] bg-[#A7C438] text-white px-1.5 py-0.5 rounded font-black">已就绪</span>}
-                      <input type="file" accept="image/*" onChange={(e) => handleFileUpload(e, relic.id)} className="text-[10px] w-48" />
-                    </div>
-                  </div>
-                ))}
               </div>
             ) : (
               <div className="space-y-4">
                 {RELICS.map(relic => (
-                  <div key={relic.id} className="p-6 bg-stone-50 rounded-[2rem] flex items-center justify-between">
-                    <span className="text-sm font-black text-gray-800">{relic.title}</span>
-                    <div className="flex gap-2">
-                      {Object.values(AudienceType).map(type => (
-                        <label key={type} className="group relative w-10 h-10 flex flex-col items-center justify-center rounded-xl border-2 bg-white text-stone-300 cursor-pointer hover:border-[#CF4432] transition-colors">
-                          <span className={`text-[9px] font-black ${localAssetsExistence[`audio_${relic.id}_${type}`] ? 'text-[#A7C438]' : ''}`}>
-                            {type[0]}
-                          </span>
-                          {localAssetsExistence[`audio_${relic.id}_${type}`] && (
-                             <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#A7C438] rounded-full border-2 border-white shadow-sm" />
-                          )}
-                          <input type="file" className="hidden" accept="audio/*" onChange={(e) => handleFileUpload(e, `audio_${relic.id}_${type}`)} />
-                        </label>
-                      ))}
+                  <div key={relic.id} className="p-6 bg-stone-50 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 border border-stone-100">
+                    <div className="flex flex-col items-center md:items-start">
+                      <span className="text-sm font-black text-gray-800">{relic.title}</span>
+                      <span className="text-[10px] text-stone-400 font-bold uppercase mt-1">Audio Packs</span>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-3">
+                      {Object.values(AudienceType).map(type => {
+                        const audioKey = `audio_${relic.id}_${type}`;
+                        const exists = localAssetsExistence[audioKey];
+                        return (
+                          <div key={type} className="flex flex-col items-center gap-2">
+                            <label className={`relative w-12 h-12 flex items-center justify-center rounded-2xl border-2 transition-all cursor-pointer ${exists ? 'bg-white border-[#A7C438] text-[#A7C438] shadow-md' : 'bg-white border-dashed border-stone-200 text-stone-300 hover:border-stone-400'}`}>
+                              <span className="text-[10px] font-black">{type[0]}</span>
+                              {exists && <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#A7C438] rounded-full border-2 border-white flex items-center justify-center text-white"><svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg></div>}
+                              <input type="file" className="hidden" accept="audio/*" onChange={(e) => handleFileUpload(e, audioKey)} />
+                            </label>
+                            <div className="flex items-center gap-1">
+                               <span className="text-[8px] font-bold text-stone-400">{type}</span>
+                               {exists && (
+                                 <button onClick={() => { if(confirm('清除音频？')) handleFileDelete(audioKey); }} className="text-stone-300 hover:text-red-400 transition-colors">
+                                   <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                 </button>
+                               )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
               </div>
             )}
+          </div>
+          
+          <div className="mt-12 p-6 bg-amber-50 rounded-2xl border border-amber-100">
+            <h4 className="text-amber-800 font-black text-xs mb-2 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              管理提示
+            </h4>
+            <p className="text-amber-700/80 text-[10px] font-medium leading-relaxed">
+              1. 所有资源均保存在浏览器的本地数据库 (IndexedDB) 中，不会因刷新页面而丢失。<br/>
+              2. 建议使用 Chrome 或 Edge 浏览器以获得最稳定的存储体验。<br/>
+              3. 如需在多台设备间同步资源，请务必在每台设备上分别进行上传操作。
+            </p>
           </div>
         </div>
       )}
