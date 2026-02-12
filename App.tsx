@@ -62,6 +62,7 @@ const ImageWithFallback = ({ assetKey, cloudUrl, alt, className, title }: { asse
     );
   }
   
+  // 首页海报默认视觉资源调整
   const finalSrc = cloudUrl || `./${assetKey === 'poster' ? 'poster.png' : assetKey + '.png'}`;
 
   return (
@@ -84,18 +85,14 @@ const App: React.FC = () => {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   
-  // 首页同步码状态
   const [tempSyncCode, setTempSyncCode] = useState('');
   const [isSyncingFromHome, setIsSyncingFromHome] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState('');
 
-  // 增加全局同步监听
   useEffect(() => {
     const syncCode = storageService.getSyncCode();
     if (syncCode) {
-      storageService.performAutoSync().then(() => {
-        console.log('自动同步流程已完成');
-      });
+      storageService.performAutoSync();
     }
   }, []);
 
@@ -118,32 +115,22 @@ const App: React.FC = () => {
     if (tempSyncCode === '123456') {
       setIsSyncingFromHome(true);
       storageService.setSyncCode(tempSyncCode);
-      // 必须完成同步逻辑后才跳转，确保跨设备资产就绪
+      // 等待同步完成（包含云端拉取过程）
       await storageService.performAutoSync(setSyncStatusMsg);
       setIsSyncingFromHome(false);
       setCurrentPage(Page.QUIZ);
     } else {
-      alert('同步码错误。请输入正确的 123456 以激活后台资源。');
+      alert('同步码错误。请输入 123456');
     }
   };
 
   const submitSurvey = (finalRecommendation?: number) => {
     if (!selectedRelic || !session.type) return;
-
-    const uniquePlayed = Array.from(new Set(playedTypes));
-    let targetType: AudienceTypeValue = session.type;
-    
-    if (uniquePlayed.length === 1) {
-      targetType = uniquePlayed[0];
-    } else {
-      targetType = session.type;
-    }
-
     const fullEval: Evaluation = {
       id: crypto.randomUUID(),
       sessionId: session.sessionId,
       relicId: selectedRelic.id,
-      audienceType: targetType,
+      audienceType: session.type,
       matchingScore: evaluation.matchingScore || 0,
       satisfactionScore: evaluation.satisfactionScore || 0,
       recommendationScore: finalRecommendation !== undefined ? finalRecommendation : (evaluation.recommendationScore ?? 0),
@@ -154,7 +141,7 @@ const App: React.FC = () => {
     setSurveyStep(0);
     setEvaluation({ feedback: '' });
     setCurrentPage(Page.GALLERY);
-    alert('感谢参与研究！数据已安全存储。');
+    alert('数据已同步至研究后台');
   };
 
   const getNarrativeVersions = (relic: Relic): NarrativeVersion[] => {
@@ -182,7 +169,7 @@ const App: React.FC = () => {
       setIsAdminAuthenticated(true);
       setAdminPassword('');
     } else {
-      alert('密码错误。');
+      alert('密码错误');
     }
   };
 
@@ -207,53 +194,52 @@ const App: React.FC = () => {
 
       <main className={currentPage === Page.POSTER ? "" : "pt-14"}>
         {currentPage === Page.POSTER && (
-          <div className="fixed inset-0 bg-stone-950 flex flex-col items-center justify-center text-white z-50 overflow-hidden">
+          <div className="fixed inset-0 bg-[#A62C1D] flex flex-col items-center justify-center text-white z-50 overflow-hidden">
+            {/* 根据海报更新视觉细节 */}
             <ImageWithFallback 
               assetKey="poster" 
-              cloudUrl="https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?auto=format&fit=crop&q=80&w=1200" 
+              cloudUrl="https://images.unsplash.com/photo-1594132049097-293679803362?auto=format&fit=crop&q=80&w=1200" 
               alt="鲜衣怒马少年时" 
-              className="absolute inset-0 w-full h-full object-cover opacity-60 scale-105" 
+              className="absolute inset-0 w-full h-full object-cover opacity-80 mix-blend-overlay" 
             />
-            <div className="relative z-10 text-center px-10">
-               <h1 className="text-4xl font-serif font-black tracking-widest mb-4">鲜衣怒马少年时</h1>
-               <div className="w-10 h-0.5 bg-[#CF4432] mx-auto mb-6 shadow-lg" />
-               <p className="text-[10px] font-bold tracking-[0.4em] opacity-80 uppercase leading-relaxed mb-12">美术馆个性化叙事导览系统<br/>Personalized Narrative AI Guide</p>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+            
+            <div className="relative z-10 text-center px-10 max-w-lg">
+               <h1 className="text-5xl font-serif font-black tracking-[0.2em] mb-4 drop-shadow-2xl">鲜衣怒马少年时</h1>
+               <div className="w-16 h-1 bg-[#A7C438] mx-auto mb-6 shadow-lg" />
+               <p className="text-[11px] font-bold tracking-[0.4em] opacity-90 uppercase leading-relaxed mb-12">美术馆个性化叙事导览研究<br/>Youth In Splendor</p>
                
-               {/* 访客同步码窗口 */}
-               <div className="max-w-xs mx-auto bg-white/10 backdrop-blur-2xl p-6 rounded-[2.5rem] border border-white/20 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-                 <div className="text-[10px] font-black text-white/60 tracking-widest uppercase">
-                   {isSyncingFromHome ? '正在激活资源...' : '资源同步激活'}
+               <div className="bg-white/10 backdrop-blur-3xl p-7 rounded-[3rem] border border-white/20 shadow-2xl space-y-5" onClick={(e) => e.stopPropagation()}>
+                 <div className="text-[10px] font-black text-white/70 tracking-widest uppercase">
+                   {isSyncingFromHome ? '正在获取多媒体包...' : '资源包激活'}
                  </div>
                  <div className="flex gap-2">
                    <input 
                      type="text" 
                      value={tempSyncCode}
                      onChange={(e) => setTempSyncCode(e.target.value)}
-                     placeholder="输入 123456"
-                     className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-[#CF4432] transition-all"
+                     placeholder="同步码 123456"
+                     className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-[#A7C438] transition-all"
                    />
                    <button 
                      onClick={handleSyncFromHome}
-                     className="bg-[#CF4432] text-white px-5 py-3 rounded-2xl text-[11px] font-black uppercase hover:bg-[#b23a2b] active:scale-95 transition-all shadow-lg min-w-[60px]"
+                     className="bg-[#A7C438] text-white px-6 py-3 rounded-2xl text-[11px] font-black uppercase hover:bg-[#8da32e] active:scale-95 transition-all shadow-lg min-w-[70px]"
                    >
-                     {isSyncingFromHome ? '...' : '确认'}
+                     {isSyncingFromHome ? '...' : '进入'}
                    </button>
                  </div>
                  {syncStatusMsg && (
-                   <p className="text-[9px] text-white/60 font-bold animate-pulse">{syncStatusMsg}</p>
+                   <p className="text-[9px] text-[#A7C438] font-black animate-pulse">{syncStatusMsg}</p>
                  )}
                  {!syncStatusMsg && (
-                   <p className="text-[9px] text-white/40 font-bold">注：输入123456同步云端多媒体文件</p>
+                   <p className="text-[9px] text-white/40 font-bold leading-tight">注：若无数据请先在电脑后台点击“发布”</p>
                  )}
-               </div>
-               
-               <div className="mt-12 opacity-30">
-                 <p className="text-[9px] font-black tracking-[0.5em] text-white/50 uppercase">START RESEARCH EXPLORATION</p>
                </div>
             </div>
           </div>
         )}
 
+        {/* 后续逻辑维持原样 */}
         {currentPage === Page.QUIZ && (
           <div className="px-6 py-12 max-w-lg mx-auto">
             <div className="mb-14 text-center">

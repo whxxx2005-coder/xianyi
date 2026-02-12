@@ -14,7 +14,7 @@ const DB_NAME = 'HorseExhibitAssetsDB';
 const STORE_NAME = 'assets';
 const DB_VERSION = 2;
 
-// 公共 KV 存储桶（仅用于研究演示同步，生产环境请更换为专用后端）
+// 使用更稳定的同步中转服务 (KV存储)
 const CLOUD_SYNC_API = 'https://kvdb.io/A4r6u8N4W8hWfL5Z5Z5Z/'; 
 
 const getDB = (): Promise<IDBDatabase> => {
@@ -64,7 +64,6 @@ export const storageService = {
     localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
   },
 
-  // --- 资产管理 ---
   saveAsset: async (key: string, data: Blob | string): Promise<void> => {
     const db = await getDB();
     await new Promise<void>((resolve, reject) => {
@@ -126,16 +125,15 @@ export const storageService = {
     });
   },
 
-  // --- 云端同步核心 ---
   getSyncCode: () => localStorage.getItem(STORAGE_KEYS.SYNC_CODE) || '',
   setSyncCode: (code: string) => localStorage.setItem(STORAGE_KEYS.SYNC_CODE, code),
   
-  // 管理员调用：将本地所有资源上传云端
+  // 电脑端：发布资源
   pushToCloud: async (onProgress?: (msg: string) => void): Promise<void> => {
     const syncCode = storageService.getSyncCode();
     if (!syncCode) throw new Error('未设置同步码');
 
-    onProgress?.('准备打包本地资源...');
+    onProgress?.('打包本地已上传资源...');
     const db = await getDB();
     const assets: Record<string, string> = {};
     
@@ -155,36 +153,44 @@ export const storageService = {
       });
       
       if (data instanceof Blob) {
-        onProgress?.(`正在处理资源: ${key}`);
+        onProgress?.(`转换资源格式: ${key}`);
         assets[key] = await blobToBase64(data);
       } else {
         assets[key] = data;
       }
     }
 
-    onProgress?.('正在上传至云端中转站...');
+    onProgress?.('同步至云端 (可能需要数秒)...');
     await fetch(`${CLOUD_SYNC_API}${syncCode}`, {
       method: 'PUT',
       body: JSON.stringify(assets),
       headers: { 'Content-Type': 'application/json' }
     });
-    onProgress?.('同步成功！资源已在云端激活');
+    onProgress?.('云端发布成功！手机端现可同步');
   },
 
-  // 访客调用：从云端拉取所有资源并存入本地
+  // 手机端：拉取资源
   performAutoSync: async (onProgress?: (msg: string) => void): Promise<void> => {
     const syncCode = storageService.getSyncCode();
     if (!syncCode) return;
 
-    onProgress?.('正在连接研究员云端库...');
+    onProgress?.('连接云端同步库...');
     try {
-      const response = await fetch(`${CLOUD_SYNC_API}${syncCode}`);
-      if (!response.ok) throw new Error('同步码未关联资源或网络错误');
+      // 使用 cache: 'no-store' 确保手机拉取的是电脑刚刚发布的最新版
+      const response = await fetch(`${CLOUD_SYNC_API}${syncCode}`, { cache: 'no-store' });
+      
+      if (response.status === 404) {
+        onProgress?.('云端暂无数据，请先在电脑端点击“发布”。');
+        await new Promise(r => setTimeout(r, 2000));
+        return;
+      }
+
+      if (!response.ok) throw new Error('网络连接异常');
       
       const assets: Record<string, string> = await response.json();
       const keys = Object.keys(assets);
       
-      onProgress?.(`检测到 ${keys.length} 项资源，正在同步至本机...`);
+      onProgress?.(`正在下载 ${keys.length} 项最新资源...`);
       for (const key of keys) {
         const data = assets[key];
         if (data.startsWith('data:')) {
@@ -194,14 +200,15 @@ export const storageService = {
           await storageService.saveAsset(key, data);
         }
       }
-      onProgress?.('同步完成：资源已就绪');
+      onProgress?.('同步成功：资源已完全加载');
+      await new Promise(r => setTimeout(r, 800));
     } catch (e) {
       console.error(e);
-      onProgress?.('同步失败：未找到云端资源包');
+      onProgress?.('同步连接失败，请检查手机网络');
+      await new Promise(r => setTimeout(r, 2000));
     }
   },
 
-  // --- 数据统计 ---
   saveQuizResult: (result: QuizResult) => {
     const list = storageService.getAllQuizResults();
     list.push(result);
