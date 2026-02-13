@@ -132,11 +132,12 @@ const App: React.FC = () => {
         {currentPage === Page.POSTER && (
           <div className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center overflow-hidden">
             <div className="relative w-full h-full flex items-center justify-center bg-black">
-              <ImageWithFallback 
-                assetKey="horses_poster" 
-                cloudUrl="https://cdn.jsdelivr.net/gh/whxxx2005-coder/xianyinuma/1.jpg" 
+              {/* 直接使用 CDN 链接，避免 Fallback 逻辑在某些设备上失效 */}
+              <img 
+                src="https://cdn.jsdelivr.net/gh/whxxx2005-coder/xianyinuma/1.jpg" 
                 alt="鲜衣怒马少年时展览海报" 
-                className="w-full h-full object-contain" 
+                className="w-full h-full object-contain"
+                loading="eager"
               />
               <div className="absolute inset-x-0 bottom-0 p-8 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-32 flex flex-col items-center">
                 <button 
@@ -145,7 +146,7 @@ const App: React.FC = () => {
                 >
                   进入展厅
                 </button>
-                <p className="mt-6 text-[9px] font-black tracking-[0.4em] text-white/50 uppercase">Research Narratives Research Project v2.6</p>
+                <p className="mt-6 text-[9px] font-black tracking-[0.4em] text-white/50 uppercase">Research Narratives Research Project v2.7</p>
               </div>
             </div>
           </div>
